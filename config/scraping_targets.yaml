@@ -1,0 +1,107 @@
+# Scraping Targets Configuration
+# Define websites and pages to scrape
+
+targets:
+  # Example: Leadership team pages
+  - name: "Company Leadership"
+    url: "https://example.com/leadership"
+    type: "profile"
+    enabled: true
+    config:
+      follow_links: true
+      max_depth: 2
+      link_patterns:
+        - "/leadership/*"
+        - "/team/*"
+        - "/about/leadership/*"
+      selectors:
+        profile_container: "div.profile-card"
+        name: "h2.name"
+        title: "p.title"
+        bio: "div.bio"
+        image: "img.profile-img"
+        contact: "a.contact-link"
+      
+  # Example: Blog or content pages
+  - name: "Company Blog"
+    url: "https://example.com/blog"
+    type: "content"
+    enabled: false
+    config:
+      follow_links: true
+      max_depth: 1
+      link_patterns:
+        - "/blog/*"
+      selectors:
+        article_container: "article"
+        title: "h1"
+        author: "span.author"
+        date: "time"
+        content: "div.content"
+        tags: "span.tag"
+
+  # Example: Product pages
+  - name: "Products"
+    url: "https://example.com/products"
+    type: "structured"
+    enabled: false
+    config:
+      follow_links: true
+      max_depth: 1
+      link_patterns:
+        - "/products/*"
+      selectors:
+        container: "div.product"
+        name: "h3.product-name"
+        description: "p.description"
+        price: "span.price"
+        features: "ul.features li"
+
+# Global scraping settings
+settings:
+  # Rate limiting
+  rate_limit:
+    requests_per_second: 1
+    delay_between_requests: 1.0
+    
+  # Retry configuration
+  retry:
+    max_attempts: 3
+    backoff_factor: 2
+    timeout: 30
+    
+  # Content filtering
+  filters:
+    min_text_length: 50
+    exclude_patterns:
+      - "privacy-policy"
+      - "terms-of-service"
+      - "cookie-policy"
+    
+  # Auto-discovery
+  auto_discover:
+    enabled: true
+    max_pages: 100
+    same_domain_only: true
+    respect_robots_txt: true
+    
+  # Content extraction
+  extraction:
+    clean_html: true
+    extract_metadata: true
+    extract_links: true
+    extract_images: true
+    
+# Categories for classification
+categories:
+  - name: "Leadership"
+    keywords: ["ceo", "cto", "cfo", "president", "director", "executive"]
+    
+  - name: "Technology"
+    keywords: ["engineering", "developer", "architect", "technical", "software"]
+    
+  - name: "Business"
+    keywords: ["business", "sales", "marketing", "strategy", "operations"]
+    
+  - name: "Research"
+    keywords: ["research", "scientist", "phd", "analysis", "data"]

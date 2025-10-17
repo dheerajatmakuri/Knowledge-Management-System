@@ -1,0 +1,393 @@
+"""
+Universal Leadership Extraction Function
+
+This is a replacement for the extract_leadership_info function that works
+with ANY website structure for team/leadership pages.
+"""
+
+from typing import List, Dict, Any
+from datetime import datetime
+from bs4 import BeautifulSoup
+import re
+from loguru import logger
+
+
+def extract_leadership_info_universal(content: Dict[str, Any], extraction_query: str = "") -> List[Dict[str, Any]]:
+    """
+    Universal leadership extractor that works with any website structure.
+    
+    Extraction Strategies (in order of preference):
+    1. Leadership sections with structured cards/profiles
+    2. Heading-based extraction (h1-h6 with adjacent text)
+    3. List-based extraction (ul/ol with name-title pairs)
+    4. Table-based extraction
+    5. Text pattern matching (fallback)
+    
+    Args:
+        content: Scraped content dictionary with 'html', 'text', 'images', 'links', 'url'
+        extraction_query: Optional specific extraction instructions
+        
+    Returns:
+        List of dictionaries with keys: name, title, image_url, profile_url, source_url, context
+    """
+    leaders = []
+    found_leaders = {}  # Track by name to avoid duplicates
+    
+    if 'error' in content:
+        return leaders
+    
+    text = content.get('full_text', '')
+    html = content.get('html', '')
+    images = content.get('images', [])
+    links = content.get('links', [])
+    source_url = content.get('url', '')
+    
+    if not html or not text:
+        logger.warning("No HTML or text content to extract from")
+        return leaders
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    logger.info(f"Starting universal extraction from {source_url}")
+    
+    # Find leadership page links for suggestions
+    leadership_page_links = []
+    if links:
+        for link in links:
+            link_text = link.get('text', '').lower()
+            link_url = link.get('url', '').lower()
+            if any(keyword in link_text or keyword in link_url 
+                   for keyword in ['leadership', 'our-team', 'team', 'management', 'executive', 'about-us']):
+                if link.get('url') and link.get('url') not in leadership_page_links:
+                    leadership_page_links.append(link.get('url'))
+    
+    # ============================================================================
+    # CONFIGURATION: Leadership titles and patterns
+    # ============================================================================
+    
+    leadership_titles = {
+        # C-Level (Priority 10)
+        'ceo': 10, 'chief executive officer': 10, 'chief executive': 10,
+        'cto': 10, 'chief technology officer': 10, 'chief technical officer': 10,
+        'cfo': 10, 'chief financial officer': 10,
+        'coo': 10, 'chief operating officer': 10,
+        'cmo': 9, 'chief marketing officer': 9,
+        'cio': 9, 'chief information officer': 9,
+        'cso': 9, 'chief security officer': 9,
+        'cdo': 9, 'chief data officer': 9,
+        'cpo': 9, 'chief product officer': 9,
+        'chief': 9,  # Generic chief
+        
+        # President/Founder (Priority 9)
+        'president': 9, 'vice president': 8, 'vp': 8,
+        'founder': 9, 'co-founder': 9, 'cofounder': 9,
+        'chairman': 9, 'chairwoman': 9, 'chair': 9,
+        
+        # Directors (Priority 7-8)
+        'managing director': 8, 'executive director': 8,
+        'director': 7, 'associate director': 6,
+        
+        # Heads (Priority 6-7)
+        'head of': 7, 'department head': 7,
+        
+        # Managers (Priority 5-6)
+        'senior manager': 6, 'manager': 5,
+        'program manager': 5, 'project manager': 5,
+        
+        # Others (Priority 4-5)
+        'partner': 6, 'principal': 6,
+        'architect': 5, 'lead': 5, 'senior': 4
+    }
+    
+    # Section keywords for leadership
+    leadership_section_keywords = [
+        'leadership', 'team', 'management', 'executive', 
+        'our team', 'meet the team', 'about us', 'who we are',
+        'our people', 'board', 'founders', 'staff'
+    ]
+    
+    # Testimonial keywords to avoid
+    testimonial_keywords = [
+        'testimonial', 'review', 'customer', 'client', 
+        'feedback', 'what people say', 'success story'
+    ]
+    
+    def is_testimonial_section(element):
+        """Check if an element is part of testimonials."""
+        elem_text = element.get_text().lower()[:500]
+        elem_class = ' '.join(element.get('class', [])).lower()
+        return any(kw in elem_text or kw in elem_class for kw in testimonial_keywords)
+    
+    def calculate_priority(title_text: str) -> int:
+        """Calculate priority score for a title."""
+        title_lower = title_text.lower()
+        max_priority = 0
+        for keyword, priority in leadership_titles.items():
+            if keyword in title_lower:
+                max_priority = max(max_priority, priority)
+        return max_priority
+    
+    def is_valid_name(name: str) -> bool:
+        """Validate if a string looks like a person's name."""
+        if not name or len(name) < 3:
+            return False
+        
+        parts = name.split()
+        if not (2 <= len(parts) <= 5):  # Most names are 2-5 words
+            return False
+        
+        # Check if words start with capital letters
+        if not all(part[0].isupper() or part[0].isdigit() for part in parts if part):
+            return False
+        
+        # Avoid obviously wrong patterns
+        if len(name) > 100 or any(char in name for char in ['@', 'http', '|', '>']):
+            return False
+        
+        return True
+    
+    def clean_title(title: str) -> str:
+        """Clean and normalize a title."""
+        # Remove extra whitespace and newlines
+        title = ' '.join(title.split())
+        # Limit length
+        title = title[:150]
+        # Remove trailing/leading punctuation
+        title = title.strip(',.;:- ')
+        return title
+    
+    def find_image_for_person(person_element, name_parts):
+        """Find the most relevant image for a person."""
+        # Look for img in the same container
+        img = person_element.find('img')
+        if img and img.get('src'):
+            from urllib.parse import urljoin
+            return urljoin(source_url, img['src'])
+        
+        # Look in images list by alt text or filename
+        for img_dict in images:
+            img_alt = img_dict.get('alt', '').lower()
+            img_url = img_dict.get('url', '').lower()
+            if any(part.lower() in img_alt or part.lower() in img_url for part in name_parts):
+                return img_dict.get('url')
+        
+        return None
+    
+    def add_leader(name, title, image_url=None, profile_url=None, context='extracted'):
+        """Add a leader to the found_leaders dict if valid."""
+        if not is_valid_name(name):
+            return False
+        
+        priority = calculate_priority(title)
+        if priority == 0:
+            # Title doesn't match leadership keywords
+            return False
+        
+        title = clean_title(title)
+        
+        # Add or update if higher priority
+        if name not in found_leaders or found_leaders[name]['priority'] < priority:
+            found_leaders[name] = {
+                'name': name,
+                'title': title,
+                'priority': priority,
+                'image_url': image_url,
+                'profile_url': profile_url,
+                'source_url': source_url,
+                'extraction_context': context,
+                'extracted_at': datetime.now().isoformat()
+            }
+            logger.debug(f"Added: {name} - {title} (priority: {priority})")
+            return True
+        return False
+    
+    # ============================================================================
+    # STRATEGY 1: Find leadership sections and extract from structured elements
+    # ============================================================================
+    
+    logger.info("Strategy 1: Looking for leadership sections...")
+    
+    # Find sections with leadership-related classes or IDs
+    leadership_sections = []
+    
+    for tag in ['section', 'div', 'article']:
+        sections = soup.find_all(tag)
+        for section in sections:
+            section_class = ' '.join(section.get('class', [])).lower()
+            section_id = section.get('id', '').lower()
+            section_text = section.get_text()[:200].lower()
+            
+            # Check if this looks like a leadership section
+            is_leadership = any(kw in section_class or kw in section_id or kw in section_text 
+                               for kw in leadership_section_keywords)
+            
+            # Skip testimonials
+            is_testimonial = is_testimonial_section(section)
+            
+            if is_leadership and not is_testimonial:
+                leadership_sections.append(section)
+                logger.info(f"Found leadership section: {tag} with class='{section_class[:50]}'")
+    
+    # Extract from leadership sections
+    for section in leadership_sections:
+        # Look for individual profile cards/items
+        cards = section.find_all(['div', 'li', 'article'], class_=re.compile(
+            r'(card|member|person|profile|bio|item|box)', re.I))
+        
+        if not cards:
+            # If no specific cards, look for any divs/lis
+            cards = section.find_all(['div', 'li'])[:50]  # Limit to avoid processing too many
+        
+        for card in cards:
+            # Skip if looks like testimonial
+            if is_testimonial_section(card):
+                continue
+            
+            # Try to extract name (usually in heading tags)
+            name = None
+            name_tag = card.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'b'])
+            
+            if name_tag:
+                name = ' '.join(name_tag.get_text().split())
+                
+                if is_valid_name(name):
+                    # Extract title (text after name)
+                    title = None
+                    
+                    # Method 1: Check immediate next siblings
+                    for sibling in list(name_tag.next_siblings)[:5]:
+                        if isinstance(sibling, str):
+                            text = sibling.strip()
+                            if text and 10 < len(text) < 200:
+                                title = text
+                                break
+                        elif hasattr(sibling, 'name') and sibling.name in ['p', 'span', 'div']:
+                            text = sibling.get_text().strip()
+                            if text and 10 < len(text) < 200:
+                                title = text
+                                break
+                    
+                    # Method 2: Look for elements with title-related classes
+                    if not title:
+                        title_elem = card.find(['p', 'span', 'div'], class_=re.compile(
+                            r'(title|position|role|job|designation)', re.I))
+                        if title_elem:
+                            title = title_elem.get_text().strip()
+                    
+                    # Method 3: Extract from card text (get text after name)
+                    if not title:
+                        card_text = card.get_text()
+                        if name in card_text:
+                            after_name = card_text.split(name, 1)[1].strip()
+                            lines = [l.strip() for l in after_name.split('\n') if l.strip()]
+                            for line in lines[:3]:
+                                if 10 < len(line) < 200:
+                                    title = line
+                                    break
+                    
+                    if title:
+                        # Find image
+                        name_parts = name.split()
+                        image_url = find_image_for_person(card, name_parts)
+                        
+                        # Find profile link
+                        profile_url = None
+                        link = name_tag.find('a') or card.find('a')
+                        if link and link.get('href'):
+                            from urllib.parse import urljoin
+                            profile_url = urljoin(source_url, link['href'])
+                        
+                        add_leader(name, title, image_url, profile_url, 'leadership_section')
+    
+    # ============================================================================
+    # STRATEGY 2: Heading-based extraction (all h1-h6 tags)
+    # ============================================================================
+    
+    if len(found_leaders) < 5:
+        logger.info("Strategy 2: Heading-based extraction...")
+        
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        
+        for heading in headings:
+            # Skip if in testimonial section
+            parent = heading.find_parent(['section', 'div', 'article'])
+            if parent and is_testimonial_section(parent):
+                continue
+            
+            name = ' '.join(heading.get_text().split())
+            
+            if is_valid_name(name):
+                # Get title from next elements
+                title = None
+                for sibling in list(heading.next_siblings)[:5]:
+                    if isinstance(sibling, str):
+                        text = sibling.strip()
+                        if text and 10 < len(text) < 200:
+                            title = text
+                            break
+                    elif hasattr(sibling, 'name'):
+                        if sibling.name in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6']:
+                            break  # Hit next heading
+                        text = sibling.get_text().strip()
+                        if text and 10 < len(text) < 200:
+                            title = text
+                            break
+                
+                if title:
+                    name_parts = name.split()
+                    container = heading.find_parent(['div', 'article', 'section', 'li'])
+                    image_url = find_image_for_person(container or heading, name_parts) if container else None
+                    
+                    link = heading.find('a')
+                    profile_url = None
+                    if link and link.get('href'):
+                        from urllib.parse import urljoin
+                        profile_url = urljoin(source_url, link['href'])
+                    
+                    add_leader(name, title, image_url, profile_url, 'heading_extraction')
+    
+    # ============================================================================
+    # STRATEGY 3: Text pattern matching (fallback)
+    # ============================================================================
+    
+    if len(found_leaders) < 3:
+        logger.info("Strategy 3: Text pattern matching...")
+        
+        patterns = [
+            # Name followed by newline and title
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z\'\.]+){1,4})\s*\n\s*([A-Z][^|\n]{10,150})',
+            # Name with dash or comma and title
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z\'\.]+){1,4})\s*[-–—,]\s*([A-Z][^|\n]{10,150})',
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, text)
+            for match in matches:
+                name = match.group(1).strip()
+                title = match.group(2).strip()
+                
+                # Clean up title
+                title = title.split('\n')[0]  # Take first line only
+                
+                if is_valid_name(name) and calculate_priority(title) > 0:
+                    add_leader(name, title, None, None, 'text_pattern')
+    
+    # ============================================================================
+    # FINALIZE: Convert to list and sort
+    # ============================================================================
+    
+    leaders = list(found_leaders.values())
+    
+    # Sort by priority (highest first)
+    leaders.sort(key=lambda x: x['priority'], reverse=True)
+    
+    # Remove priority field (internal use only)
+    for leader in leaders:
+        leader.pop('priority', None)
+    
+    # Add suggestion for better URLs if found few results
+    if len(leaders) < 5 and leadership_page_links:
+        content['suggested_leadership_urls'] = leadership_page_links[:5]
+        logger.warning(f"Only found {len(leaders)} leaders. Suggested URLs: {leadership_page_links[:3]}")
+    
+    logger.success(f"Extracted {len(leaders)} unique leadership profiles")
+    return leaders

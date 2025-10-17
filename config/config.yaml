@@ -1,0 +1,142 @@
+---
+# Knowledge Management System Configuration
+
+app:
+  name: "Intelligent Knowledge Management System"
+  version: "1.0.0"
+  description: "Advanced knowledge management with semantic search and scope-aware AI"
+
+database:
+  type: "sqlite"
+  connection:
+    path: "${DATABASE_PATH:data/database.db}"
+    echo: false
+    pool_size: 5
+    max_overflow: 10
+  optimization:
+    enable_wal: true
+    cache_size: 10000
+    journal_mode: "WAL"
+    synchronous: "NORMAL"
+
+scraper:
+  rate_limiting:
+    delay: 1.0
+    max_retries: 3
+    backoff_factor: 2
+  headers:
+    user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  timeout: 30
+  auto_discovery:
+    enabled: true
+    max_depth: 3
+    max_pages: 100
+    follow_external: false
+    content_types:
+      - "text/html"
+      - "application/xhtml+xml"
+  extraction:
+    profile_selectors:
+      - ".profile"
+      - ".team-member"
+      - ".person"
+      - "[itemtype='http://schema.org/Person']"
+    fields:
+      - name
+      - title
+      - bio
+      - email
+      - phone
+      - linkedin
+      - twitter
+
+embeddings:
+  model: "all-MiniLM-L6-v2"
+  device: "cpu"  # or "cuda" for GPU
+  batch_size: 32
+  max_length: 512
+  normalize: true
+  cache:
+    enabled: true
+    directory: "data/embeddings"
+
+search:
+  engine: "faiss"  # or "simple" for basic search
+  top_k: 10
+  similarity_threshold: 0.3
+  ranking:
+    use_bm25: true
+    use_semantic: true
+    semantic_weight: 0.7
+    bm25_weight: 0.3
+  filters:
+    enable_category: true
+    enable_date: true
+    enable_source: true
+
+assistant:
+  llm:
+    provider: "openai"  # or "local" for offline models
+    model: "gpt-3.5-turbo"
+    temperature: 0.7
+    max_tokens: 500
+    top_p: 0.9
+  context:
+    max_length: 4000
+    max_documents: 5
+    overlap: 200
+  scope_checking:
+    enabled: true
+    confidence_threshold: 0.5
+    fallback_message: "I don't have information about that in my knowledge base."
+  prompts:
+    system_template: "system_prompt.txt"
+    user_template: "user_prompt.txt"
+
+ui:
+  streamlit:
+    page_title: "Knowledge Management System"
+    page_icon: "🧠"
+    layout: "wide"
+    initial_sidebar_state: "expanded"
+  theme:
+    primary_color: "#0066CC"
+    background_color: "#FFFFFF"
+    secondary_background: "#F0F2F6"
+    text_color: "#262730"
+  features:
+    enable_chat: true
+    enable_browse: true
+    enable_search: true
+    enable_admin: true
+    enable_visualization: true
+  chat:
+    max_history: 50
+    show_sources: true
+    enable_feedback: true
+
+logging:
+  level: "INFO"
+  format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+  file:
+    enabled: true
+    path: "logs/app.log"
+    rotation: "10 MB"
+    retention: "1 week"
+    compression: "zip"
+  console:
+    enabled: true
+    colorize: true
+
+cache:
+  enabled: true
+  directory: "data/cache"
+  ttl: 3600
+  max_size_mb: 500
+
+backup:
+  enabled: true
+  directory: "data/backups"
+  frequency: "daily"
+  retention_days: 30
+  compress: true
