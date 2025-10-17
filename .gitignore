@@ -73,6 +73,5 @@ models/
 *.temp
 temp/
 
-# Ignore markdown and docs
-*.md
+# Ignore docs
 docs/
