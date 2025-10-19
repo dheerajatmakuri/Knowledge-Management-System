@@ -72,6 +72,3 @@ models/
 *.tmp
 *.temp
 temp/
-
-# Ignore docs
-docs/
